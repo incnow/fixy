@@ -8,69 +8,114 @@ String.prototype.splice = function(idx, rem, str) {
     return this.slice(0, idx) + str + this.slice(idx + Math.abs(rem));
 };
 
+var parsers = {
+	parser: {}
+};
+
+parsers.add = function(type, parserFunction) {
+	parsers.parser[type] = {};
+	parsers.parser[type].parse = parserFunction;
+}
+
+parsers.list = function() {
+	return Object.keys(parsers.parser);
+}
+parsers.parse = function(data, options) {
+	if (this.parser[options.type] &&
+		typeof this.parser[options.type].parse === 'function') {
+
+		return this.parser[options.type].parse(data, options)
+	} else {
+		if (this.parser.default &&
+			typeof this.parser.default.parse === 'function') {
+
+			return this.parser.default.parse(data, options)
+		} else {
+			return data;
+		}
+	}
+}
+
+parsers.add("bool", function(data, options) {
+	return (data === options.tVal) ? true : false;
+});
+
+parsers.add("date", function(data, options) {
+	var output = null;
+
+	if (options && options.inputformat && options.outputformat) {
+		if (moment(data, options.inputformat).isValid()) {
+			output = moment(data, options.inputformat)
+						.format(options.outputformat);	
+		}
+	} else if (moment(data).isValid()) {
+		output = moment(data).format(options.outputformat);
+	}
+
+	return output;
+});
+
+parsers.add("float", function(data, options) {
+	var defaultPrecision = 2;
+
+	var output = null;
+
+	if (options.percision) {
+		options.precision = options.percision;
+
+		delete options.percision;
+	}
+
+	var precision = (parseInt(options.precision) >= 0) ?
+						options.precision :
+						defaultPrecision;
+
+	var symbol = (options.symbol && options.format === "csv") ?
+					options.symbol : "";
+
+	if (lodash.includes(data, '.')) {
+		output = symbol + parseFloat(data).toFixed(precision);
+	} else {
+		output = symbol + parseFloat(data
+										.splice(options.width -
+											precision, 0, '.'))
+										.toFixed(precision);
+	}
+
+	return output;
+});
+
+parsers.add("int", function(data, options) {
+	return parseInt(data);
+});
+
+parsers.add("string", function(data, options) {
+	return data;
+});
+
+parsers.add("default", parsers.parser.string.parse)
+
 var parseCol = function(row, map, format){
 	var r = {};
 	lodash.forEach(map, function(i){
+		if (format) { i.format = format; }
 		var v = row.substring(i.start-1, (i.start + i.width - 1)).trim();
 		if(v){
-			switch(i.type){
-				case "date":
-					if(i.inputformat){
-						if(moment(v, i.inputformat).isValid()){
-							r[i.name] = moment(v, i.inputformat).format(i.outputformat);	
-						}
-						else{
-							r[i.name] = null;
-						}
-					}
-					else{
-						if(moment(v).isValid()){
-							r[i.name] = moment(v).format(i.outputformat);
-						}
-						else{
-							r[i.name] = null;
-						}
-					}
-					break;
-				case "float":
-					var percision = 2;
-					if(i.percision){
-						percision = i.percision;
-					}
-					var symbol = "";
-					if(i.symbol && format === "csv"){
-						symbol = i.symbol;
-					}
-
-					if(lodash.includes(v, ".")){
-						r[i.name] = symbol + parseFloat(v).toFixed(percision);
-					}
-					else{
-						r[i.name] = symbol + parseFloat(v.splice(i.width - percision, 0, ".")).toFixed(percision);
-					}
-					break;
-				case "int":
-					r[i.name] = parseInt(v);
-					break;
-				case "bool":
-					r[i.name] = false;
-					if(v === i.tVal){
-						r[i.name] = true;
-					}
-					break;
-				case "string":
-					r[i.name] = v;
-					break;
-				default:
-					r[i.name] = v;
-			}
-		}
-		else{
-			r[i.name] = null;
+			r[i.name] = parsers.parse(v, i);
 		}
 	});
 	return r;
 };
+
+internals.parsers = parsers.parser;
+
+internals.addParser = function(type, parserFunction) {
+	parsers.add(type, parserFunction);
+}
+
+internals.getParsers = function() {
+	return parsers.list();
+}
 
 internals.parse = function(specs, input){
 	try {
